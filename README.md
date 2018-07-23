@@ -1,4 +1,6 @@
 # myBlockChain
-#区块链学习
-#2018 7/22
-#在本机配置Linux pycharm开发环境，并链接
+**Time: 7/23 2018**
+
+----
+#mySnakeCoin
+从大佬那学习的五十行写区块链
