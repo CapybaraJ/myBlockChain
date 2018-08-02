@@ -7,12 +7,31 @@ from textwrap import dedent
 from time import time
 from uuid import uuid4
 from flask import Flask, jsonify, request
+import urlparse
+import requests
+
 
 class Blockchain(object):
+    # 初始化函数
     def __init__(self):
         self.chain = []
         self.current_transactions = []
+        self.nodes = set()
 
+        #创世区块
+        self.new_block(previous_hash= 1, proof=100)
+
+    # 注册节点，采用最简单地址注册
+    def register_node(self, address):
+        """
+        Add a new node to the list of nodes
+        :param address: <str> Address of node. Eg. 'http://192.168.0.5:5000'
+        :return: None
+        """
+        parsed_url = urlparse(address)
+        self.nodes.add(parsed_url.netloc)
+
+    # 创建新区块，交易数组置空
     def new_block(self, proof, previous_hash=None):
         """
         创建一个新的区块到区块链中
@@ -34,7 +53,8 @@ class Blockchain(object):
         self.chain.append(block)
         return block
 
-    def new_transactions(self, sender, recipient, amount):
+    # 创建新的交易
+    def new_transaction(self, sender, recipient, amount):
         """
         创建一笔新的交易到下一个被挖掘的区块中
         :param sender: <str> 发送人的地址
@@ -50,10 +70,12 @@ class Blockchain(object):
 
         return self.last_block['index'] + 1
 
+    # 返回上一个区块
     @property
     def last_block(self):
         return self.chain[-1]
 
+    # 计算区块hash
     @staticmethod
     def hash(block):
         """
@@ -65,6 +87,7 @@ class Blockchain(object):
         block_string = json.dumps(block, sort_keys=True).encode()
         return hashlib.sha256(block_string).hexdigest()
 
+    # 工作量证明
     def proof_of_work(self, last_proof):
         """
         Simple Proof of Work Algorithm:
@@ -80,6 +103,7 @@ class Blockchain(object):
 
         return proof
 
+    # 工作量证明子函数
     @staticmethod
     def valid_proof(last_proof, proof):
         """
@@ -95,7 +119,69 @@ class Blockchain(object):
         # 衡量算法复杂度的办法是修改零开头的个数
         return guess_hash[:4] == "0000"
 
-#block example
+    # 证明链的有效性
+    def valid_chain(self, chain):
+        """
+        Determine if a given blockchain is valid
+        :param chain: <list> A blockchain
+        :return: <bool> True if valid, False if not
+        """
+
+        last_block = chain[0]
+        current_index = 1
+
+        while current_index < len(chain):
+            block = chain[current_index]
+            print(last_block)
+            print(block)
+            print("\n-----------\n")
+            # Check that the hash of the block is correct
+            if block['previous_hash'] != self.hash(last_block):
+                return False
+
+            # Check that the Proof of Work is correct
+            if not self.valid_proof(last_block['proof'], block['proof']):
+                return False
+
+            last_block = block
+            current_index += 1
+
+        return True
+
+    # 处理冲突，其实就是和相邻节点作比较，如果相邻节点是最长链，那么就替换自己的链为相邻节点链
+    def resolve_conflicts(self):
+        """
+        This is our Consensus Algorithm, it resolves conflicts
+        by replacing our chain with the longest one in the network.
+        :return: <bool> True if our chain was replaced, False if not
+        """
+
+        neighbours = self.nodes
+        new_chain = None
+
+        # We're only looking for chains longer than ours
+        max_length = len(self.chain)
+
+        # Grab and verify the chains from all the nodes in our network
+        for node in neighbours:
+            response = requests.get('http://{}/chain'.format(node))
+
+            if response.status_code == 200:
+                length = response.json()['length']
+                chain = response.json()['chain']
+
+                # Check if the length is longer and the chain is valid
+                if length > max_length and self.valid_chain(chain):
+                    max_length = length
+                    new_chain = chain
+
+        # Replace our chain if we discovered a new, valid chain longer than ours
+        if new_chain:
+            self.chain = new_chain
+            return True
+
+        return False
+
 '''
 block example:
 
@@ -158,7 +244,7 @@ def mine():
 @app.route('/transactions/new', methods=['POST'])
 def new_transaction():
     values = request.get_json()
-
+    print values
     # Check that the required fields are in the POST'ed data
     required = ['sender', 'recipient', 'amount']
     if not all(k in values for k in required):
@@ -182,4 +268,4 @@ def full_chain():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='127.0.0.1', port=5000)
